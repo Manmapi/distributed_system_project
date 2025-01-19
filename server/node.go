@@ -5,36 +5,8 @@ import (
 	"log"
 	"net"
 	"net/rpc"
-	"sync"
 	"time"
-
-	"github.com/marcelloh/fastdb"
 )
-
-type Node struct {
-	id       int
-	peerIds  []int
-	leaderId int
-
-	electionMutex    sync.Mutex
-	isElectionGoging bool
-
-	internalListener net.Listener
-	internalServer   *rpc.Server
-
-	leaderListener net.Listener
-	leaderServer   *rpc.Server
-}
-
-type InternalRPC struct {
-	node *Node
-}
-
-type LeaderRPC struct {
-	node  *Node
-	db    *fastdb.DB
-	mutex sync.Mutex
-}
 
 type SetKeyArgs struct {
 	BucketName string
@@ -59,36 +31,56 @@ type Response struct {
 
 type EmptyRequest struct{}
 
-func (server *LeaderRPC) SetKey(agrs *SetKeyArgs, reply *Response) error {
-	server.mutex.Lock()
-	defer server.mutex.Unlock()
-	server.db.Set(agrs.BucketName, agrs.Key, []byte(agrs.Value))
+func (server *LeaderRPC) SetKey(args *SetKeyArgs, reply *Response) error {
+	database := server.node.database
+	database.mutex.Lock()
+	defer database.mutex.Unlock()
+	database.db.Set(args.BucketName, args.Key, []byte(args.Value))
 	reply.Message = "OK"
+	server.doReplicate(ReplicateDataReq{
+		BucketName: args.BucketName,
+		Key:        args.Key,
+		Value:      args.Value,
+		Action:     "SET",
+	})
 	return nil
 }
 
 func (server *LeaderRPC) GetKey(args *GetKeyArgs, reply *Response) error {
-	data, isExist := server.db.Get(args.BucketName, args.Key)
+	database := server.node.database
+
+	data, isExist := database.db.Get(args.BucketName, args.Key)
 	if !isExist {
 		reply.Message = "Not found"
 	} else {
 		reply.Data = string(data)
 	}
+
 	return nil
 }
 
 func (server *LeaderRPC) DeleteKey(args *DeleteKeyArgs, reply *Response) error {
-	ok, err := server.db.Del(args.BucketName, args.Key)
+	database := server.node.database
+	database.mutex.Lock()
+	defer database.mutex.Unlock()
+	ok, err := database.db.Del(args.BucketName, args.Key)
 	if !ok {
 		reply.Message = "Faild to delete key" + string(err.Error())
 	} else {
 		reply.Message = "OK"
 	}
+	server.doReplicate(ReplicateDataReq{
+		BucketName: args.BucketName,
+		Key:        args.Key,
+		Value:      "",
+		Action:     "SET",
+	})
 	return nil
 }
 
 func (server *LeaderRPC) GetStoreInfo(args EmptyRequest, reply *Response) error {
-	reply.Data = server.db.Info()
+	database := server.node.database
+	reply.Data = database.db.Info()
 	return nil
 }
 
@@ -136,6 +128,7 @@ func (node *Node) startElection() {
 	}
 	var isFoundHigherActiveNode bool = false
 	for _, nextId := range higherIds {
+		log.Printf("[Node %d] Call Election to node %d ", node.id, nextId)
 		var electionReply ElectionRes
 		err := node.callToPeer(
 			nextId,
@@ -158,50 +151,6 @@ func (node *Node) startElection() {
 		node.becomeLeader()
 	}
 }
-
-// func (rpcNode *InternalRPC) StartElection(args ElectionReq, reply *ElectionRes) error {
-// 	n := rpcNode.node
-// 	n.electionMutex.Lock()
-
-// 	if rpcNode.node.isElectionGoging {
-// 		n.electionMutex.Unlock()
-// 		reply.Ack = true
-// 		return nil
-// 	}
-
-// 	rpcNode.node.isElectionGoging = true
-// 	n.electionMutex.Unlock()
-
-// 	higherIds := []int{}
-// 	for _, peerId := range rpcNode.node.peerIds {
-// 		if peerId > rpcNode.node.id {
-// 			higherIds = append(higherIds, peerId)
-// 		}
-// 	}
-// 	var isFoundHigherActiveNode bool = false
-// 	for _, nextId := range higherIds {
-// 		var electionReply ElectionRes
-// 		log.Printf("[Node %d] StartElection: Call Election to node %d", rpcNode.node.id, nextId)
-// 		err := rpcNode.node.callToPeer(
-// 			nextId,
-// 			"Election",
-// 			ElectionReq{rpcNode.node.id},
-// 			&electionReply,
-// 		)
-// 		if err != nil {
-// 			log.Fatal("Has error while trying to get key", err)
-// 		} else if electionReply.Ack {
-// 			// Have another higher node to delegage. Abort
-// 			isFoundHigherActiveNode = true
-// 			break
-// 		}
-// 	}
-
-// 	if !isFoundHigherActiveNode {
-// 		n.becomeLeader()
-// 	}
-// 	return nil
-// }
 
 type ElectionReq struct {
 	SenderID int
@@ -272,12 +221,7 @@ func (node *Node) becomeLeader() {
 	defer node.electionMutex.Unlock()
 	log.Printf("[Node %d] I am now the leader.\n", node.id)
 	node.leaderId = node.id
-	store, err := fastdb.Open(":memory:", 100)
-	if err != nil {
-		message := fmt.Sprintf("[Node %d] Failed to open db", node.id)
-		log.Fatal(message)
-	}
-	node.startLeaderServer(store)
+	node.startLeaderServer()
 	// Notify to other nodes
 	for _, nextId := range node.peerIds {
 		log.Printf("[Node %d] Notify to node %d that leader is %d", node.id, nextId, node.id)
@@ -295,9 +239,12 @@ func (node *Node) becomeLeader() {
 	}
 }
 
-func (node *Node) startInternalServer() {
+func (node *Node) startInternalServer(sharedDataBase *Database) {
 	node.internalServer = rpc.NewServer()
-	node.internalServer.Register(&InternalRPC{node: node})
+
+	node.internalServer.Register(&InternalRPC{
+		node: node,
+	})
 
 	port := 8000 + node.id
 	addr := fmt.Sprintf(":%d", port)
@@ -316,11 +263,10 @@ func (node *Node) startInternalServer() {
 	}()
 }
 
-func (node *Node) startLeaderServer(store *fastdb.DB) {
+func (node *Node) startLeaderServer() {
 	node.leaderServer = rpc.NewServer()
 	node.leaderServer.Register(&LeaderRPC{
 		node: node,
-		db:   store,
 	})
 
 	l, err := net.Listen("tcp", ":8000")
@@ -363,11 +309,56 @@ func (node *Node) startHeartbeatRoutine() {
 				HeartbeatReq{node.id},
 				&heartbeatRes,
 			)
-			log.Printf("[Node %d] Heartbeat: ", node.id, err)
 			if err != nil || !heartbeatRes.Alive {
 				log.Printf("[Node %d] Could not heartbeat to leader => Start electing ", node.id)
-				go node.startElection()
+				node.startElection()
 			}
 		}
 	}()
+}
+
+type ReplicateDataReq struct {
+	Action     string // SET|DELETE
+	BucketName string
+	Key        int
+	Value      string
+}
+
+type ReplicateDataRes struct {
+	IsSuccess bool
+}
+
+/*
+--------------
+REPLICATE DATA
+--------------
+*/
+func (nodeRPC *InternalRPC) ReplicateAction(args ReplicateDataReq, reply *ReplicateDataRes) error {
+	log.Printf("[Node %d] Receive replication request with action %s and key %s", nodeRPC.node.id, args.Action, args.BucketName)
+	database := nodeRPC.node.database
+	database.mutex.Lock()
+	defer database.mutex.Unlock()
+	if args.Action == "DELETE" {
+		database.db.Del(args.BucketName, args.Key)
+	} else if args.Action == "SET" {
+		database.db.Set(args.BucketName, args.Key, []byte(args.Value))
+	}
+	return nil
+}
+
+func (leaderRPC *LeaderRPC) doReplicate(args ReplicateDataReq) {
+	peerIds := leaderRPC.node.peerIds
+	for _, peerId := range peerIds {
+		var replicateRes ReplicateDataRes
+		// Don't care about ack
+		err := leaderRPC.node.callToPeer(
+			peerId,
+			"InternalRPC.ReplicateAction",
+			args,
+			&replicateRes,
+		)
+		if err != nil {
+			log.Println(err)
+		}
+	}
 }

@@ -2,11 +2,47 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
+	"net"
+	"net/rpc"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/marcelloh/fastdb"
 )
+
+type Node struct {
+	id       int
+	peerIds  []int
+	leaderId int
+
+	electionMutex    sync.Mutex
+	isElectionGoging bool
+
+	internalListener net.Listener
+	internalServer   *rpc.Server
+
+	leaderListener net.Listener
+	leaderServer   *rpc.Server
+
+	database *Database
+}
+
+type Database struct {
+	db    *fastdb.DB
+	mutex sync.Mutex
+}
+
+type InternalRPC struct {
+	node *Node
+}
+
+type LeaderRPC struct {
+	node *Node
+}
 
 func main() {
 	// 1) Parse environment variables
@@ -29,16 +65,23 @@ func main() {
 		}
 	}
 
-	// 2) Create the node
+	store, err := fastdb.Open(":memory:", 100)
+	if err != nil {
+		message := fmt.Sprintf("[Node %d] Failed to open db", nodeID)
+		log.Fatal(message)
+	}
+	sharedDataBase := Database{db: store}
 	node := &Node{
 		id:       *nodeID,
 		peerIds:  peerIDs,
 		leaderId: -1,
 
 		isElectionGoging: false,
+
+		database: &sharedDataBase,
 	}
 
-	node.startInternalServer()
+	node.startInternalServer(&sharedDataBase)
 
 	time.Sleep(2 * time.Second)
 
