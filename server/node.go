@@ -109,6 +109,28 @@ func (rpcNode *InternalRPC) Election(args ElectionReq, reply *ElectionRes) error
 	return nil
 }
 
+type StepDownReq struct {
+	SenderID int
+}
+
+type StepDownRes struct {
+	Ok bool
+}
+
+func (rpcNode *LeaderRPC) StepDown(args StepDownReq, reply *StepDownRes) error {
+	if rpcNode.node.id != rpcNode.node.leaderId {
+		reply.Ok = true
+		return nil
+	}
+	if rpcNode.node.id > args.SenderID {
+		reply.Ok = false
+	} else {
+		rpcNode.node.leaderListener.Close()
+		reply.Ok = true
+	}
+	return nil
+}
+
 func (rpcNode *InternalRPC) NotifyLeader(args NotifyLeaderReq, reply *NotifyLeaderRes) error {
 	newLeader := args.LeaderId
 	reply.Ack = true
@@ -150,6 +172,20 @@ func (node *Node) becomeLeader() {
 	// Reasign and start Leader server only if it not is a leader before
 	if node.leaderId != node.id {
 		node.leaderId = node.id
+		for _, nextId := range node.peerIds {
+			log.Printf("[Node %d] Notify to node %d that leader is %d", node.id, nextId, node.id)
+			var stepDownRes StepDownRes
+			// Broadcast to other node to release port 8000
+			err := node.callToLeader(
+				nextId,
+				"LeaderRPC.StepDown",
+				StepDownReq{node.id},
+				&stepDownRes,
+			)
+			if err != nil {
+				log.Println(err)
+			}
+		}
 		node.startLeaderServer()
 	}
 
