@@ -53,7 +53,6 @@ func main() {
 	if *peersStr == "" {
 		log.Fatal("Peers must be specified via -peers")
 	}
-
 	var peerIDs []int
 	for _, p := range strings.Split(*peersStr, ",") {
 		pid, err := strconv.Atoi(strings.TrimSpace(p))
@@ -83,20 +82,9 @@ func main() {
 
 	node.startInternalServer(&sharedDataBase)
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	node.startHeartbeatRoutine()
-
-	go func() {
-		time.Sleep(5 * time.Second)
-		node.electionMutex.Lock()
-		if node.leaderId == -1 {
-			node.electionMutex.Unlock()
-			go node.startElection()
-		} else {
-			node.electionMutex.Unlock()
-		}
-	}()
 
 	// Keep this node running
 	select {}

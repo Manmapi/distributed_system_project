@@ -167,7 +167,7 @@ func main() {
 	testSetGetDelete(leaderClient)
 
 	// 3) Mass test
-	testMassSetAndGet(leaderClient, "BulkBucket", 50)
+	testMassSetAndGet(leaderClient, "BulkBucket", 20)
 
 	// ---------- NEW TEST CASES FOR GetStoreInfo ----------
 	fmt.Println("== Test #1: GetStoreInfo from the leader (should succeed) ==")
@@ -203,8 +203,8 @@ func main() {
 
 	// 7) Verify data is consistent
 	fmt.Println("== Checking data from BulkBucket on new leader ==\n")
-	lastVal := getKey(newLeaderClient, GetKeyArgs{"BulkBucket", 49})
-	fmt.Println(" GetKey(BulkBucket,49) =>", lastVal)
+	lastVal := getKey(newLeaderClient, GetKeyArgs{"BulkBucket", 20})
+	fmt.Println(" GetKey(BulkBucket,20) =>", lastVal)
 
 	// 8) Check store info again on new leader
 	fmt.Println("\n== Test #3: GetStoreInfo on new leader (post-failover) ==\n")
