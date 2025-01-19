@@ -52,11 +52,6 @@ type DeleteKeyArgs struct {
 	Key        int
 }
 
-type Server struct {
-	db    *fastdb.DB
-	mutex sync.Mutex
-}
-
 type Response struct {
 	Data    string
 	Message string
@@ -113,12 +108,12 @@ func (node *Node) callToPeer(peerId int, method string, args interface{}, reply 
 	}
 	address := fmt.Sprintf("localhost:%d", port)
 	client, err := rpc.Dial("tcp", address)
+	log.Printf("[Node %d] Calling method %s", node.id, method)
 	if err != nil {
 		log.Printf("[Node %d] Could not connect to peer %d at %d: %v\n",
 			node.id, peerId, port, err)
 		return err
 	}
-	log.Printf("[Node %d] Calling method %s", node.id, method)
 	defer client.Close()
 	return client.Call(method, args, reply)
 
@@ -158,6 +153,7 @@ func (node *Node) startElection() {
 	}
 
 	if !isFoundHigherActiveNode {
+		node.isElectionGoging = false
 		// TODO: promote to leader and notified all other node
 		node.becomeLeader()
 	}
@@ -240,7 +236,7 @@ func (rpcNode *InternalRPC) Election(args ElectionReq, reply *ElectionRes) error
 func (rpcNode *InternalRPC) NotifyLeader(args NotifyLeaderReq, reply *NotifyLeaderRes) error {
 	newLeader := args.LeaderId
 	reply.Ack = true
-	log.Printf("[Node %d] Receive NotifyLeader", rpcNode.node.id, newLeader)
+	log.Printf("[Node %d] Receive NotifyLeader %d", rpcNode.node.id, newLeader)
 	// If leaderId is smaller than current leaderId, no need to change
 
 	rpcNode.node.leaderId = newLeader
@@ -327,14 +323,12 @@ func (node *Node) startLeaderServer(store *fastdb.DB) {
 		db:   store,
 	})
 
-	port := 8000
-	addr := fmt.Sprintf(":%d", port)
-	l, err := net.Listen("tcp", addr)
+	l, err := net.Listen("tcp", ":8000")
 	if err != nil {
-		log.Fatalf("[Node %d] Cannot listen on %s: %v", node.id, addr, err)
+		log.Fatalf("[Node %d] Cannot listen on %s: %v", node.id, "8000", err)
 	}
 	node.leaderListener = l
-	log.Printf("[Node %d] Leader server listening on %s", node.id, addr)
+	log.Printf("[Node %d] Leader server listening on %s", node.id, "8000")
 	go func() {
 		// Continuous loop
 		for {
@@ -369,7 +363,9 @@ func (node *Node) startHeartbeatRoutine() {
 				HeartbeatReq{node.id},
 				&heartbeatRes,
 			)
+			log.Printf("[Node %d] Heartbeat: ", node.id, err)
 			if err != nil || !heartbeatRes.Alive {
+				log.Printf("[Node %d] Could not heartbeat to leader => Start electing ", node.id)
 				go node.startElection()
 			}
 		}

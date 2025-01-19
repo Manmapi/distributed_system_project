@@ -1,8 +1,8 @@
 package main
 
 import (
+	"flag"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -10,37 +10,28 @@ import (
 
 func main() {
 	// 1) Parse environment variables
-	nodeIDStr := os.Getenv("NODE_ID")
-	if nodeIDStr == "" {
-		log.Fatal("Missing environment variable NODE_ID")
-	}
-	nodeID, err := strconv.Atoi(nodeIDStr)
-	if err != nil {
-		log.Fatalf("Invalid NODE_ID=%s: %v", nodeIDStr, err)
-	}
+	nodeID := (flag.Int("id", 1, "Node ID"))
+	peersStr := flag.String("peers", "", "Comma-separated list of peer IDs")
+	flag.Parse()
 
-	peersEnv := os.Getenv("PEERS")
-	if peersEnv == "" {
-		log.Println("No PEERS environment var. This node has no peers.")
+	if *peersStr == "" {
+		log.Fatal("Peers must be specified via -peers")
 	}
 
 	var peerIDs []int
-	if peersEnv != "" {
-		for _, pStr := range strings.Split(peersEnv, ",") {
-			pStr = strings.TrimSpace(pStr)
-			if pStr == "" {
-				continue
-			}
-			pid, err := strconv.Atoi(pStr)
-			if err == nil && pid != nodeID {
-				peerIDs = append(peerIDs, pid)
-			}
+	for _, p := range strings.Split(*peersStr, ",") {
+		pid, err := strconv.Atoi(strings.TrimSpace(p))
+		if err != nil {
+			log.Fatalf("Invalid peer ID: %s", p)
+		}
+		if pid != *nodeID {
+			peerIDs = append(peerIDs, pid)
 		}
 	}
 
 	// 2) Create the node
 	node := &Node{
-		id:       nodeID,
+		id:       *nodeID,
 		peerIds:  peerIDs,
 		leaderId: -1,
 
@@ -54,7 +45,7 @@ func main() {
 	node.startHeartbeatRoutine()
 
 	go func() {
-		time.Sleep(3 * time.Second)
+		time.Sleep(5 * time.Second)
 		node.electionMutex.Lock()
 		if node.leaderId == -1 {
 			node.electionMutex.Unlock()

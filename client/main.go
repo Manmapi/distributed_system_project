@@ -32,7 +32,7 @@ type DeleteKeyArgs struct {
 
 func getKey(client *rpc.Client, args GetKeyArgs) string {
 	var reply Response
-	err := client.Call("Server.GetKey", args, &reply)
+	err := client.Call("LeaderRPC.GetKey", args, &reply)
 	if err != nil {
 		log.Println("Has error while trying to get key", err)
 	}
@@ -45,7 +45,7 @@ func getKey(client *rpc.Client, args GetKeyArgs) string {
 
 func getStoreInfo(client *rpc.Client) string {
 	var reply Response
-	err := client.Call("Server.GetStoreInfo", EmptyRequest{}, &reply)
+	err := client.Call("LeaderRPC.GetStoreInfo", EmptyRequest{}, &reply)
 	if err != nil {
 		log.Println("Has error while trying to get key", err)
 	}
@@ -58,7 +58,7 @@ func getStoreInfo(client *rpc.Client) string {
 
 func setKey(client *rpc.Client, args SetKeyArgs) {
 	var reply Response
-	err := client.Call("Server.SetKey", args, &reply)
+	err := client.Call("LeaderRPC.SetKey", args, &reply)
 	if err != nil {
 		log.Println("Has error while trying to set key", err)
 	}
@@ -69,7 +69,7 @@ func setKey(client *rpc.Client, args SetKeyArgs) {
 
 func deleteKey(client *rpc.Client, args DeleteKeyArgs) {
 	var reply Response
-	err := client.Call("Server.DeleteKey", args, &reply)
+	err := client.Call("LeaderRPC.DeleteKey", args, &reply)
 	if err != nil {
 		log.Println("Has error while trying to get key ", err)
 	}
@@ -122,9 +122,10 @@ func testDelete(client *rpc.Client) {
 	println(dateOfBirth)
 }
 func main() {
-	client, err := rpc.DialHTTP("tcp", "localhost"+":2233")
+	address := fmt.Sprintf("localhost:%d", 8000)
+	client, err := rpc.Dial("tcp", address)
 	if err != nil {
-		log.Fatal("dialing:", err)
+		log.Fatal(err.Error())
 	}
 
 	println("Test simple set and get")
