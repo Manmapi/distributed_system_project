@@ -34,7 +34,7 @@ func getKey(client *rpc.Client, args GetKeyArgs) string {
 	var reply Response
 	err := client.Call("Server.GetKey", args, &reply)
 	if err != nil {
-		log.Fatal("Has error while trying to get key", err)
+		log.Println("Has error while trying to get key", err)
 	}
 	if reply.Message != "" {
 		return "Can not get key: " + reply.Message
@@ -47,10 +47,10 @@ func getStoreInfo(client *rpc.Client) string {
 	var reply Response
 	err := client.Call("Server.GetStoreInfo", EmptyRequest{}, &reply)
 	if err != nil {
-		log.Fatal("Has error while trying to get key", err)
+		log.Println("Has error while trying to get key", err)
 	}
 	if reply.Message != "" {
-		log.Fatal("Has error while trying to get key", reply.Message)
+		log.Println("Has error while trying to get key", reply.Message)
 	}
 	data := reply.Data
 	return data
@@ -60,10 +60,10 @@ func setKey(client *rpc.Client, args SetKeyArgs) {
 	var reply Response
 	err := client.Call("Server.SetKey", args, &reply)
 	if err != nil {
-		log.Fatal("Has error while trying to set key", err)
+		log.Println("Has error while trying to set key", err)
 	}
 	if reply.Message != "OK" {
-		log.Fatal("Has error while trying to set key", reply.Message)
+		log.Println("Has error while trying to set key", reply.Message)
 	}
 }
 
@@ -71,7 +71,7 @@ func deleteKey(client *rpc.Client, args DeleteKeyArgs) {
 	var reply Response
 	err := client.Call("Server.DeleteKey", args, &reply)
 	if err != nil {
-		log.Fatal("Has error while trying to get key ", err)
+		log.Println("Has error while trying to get key ", err)
 	}
 }
 

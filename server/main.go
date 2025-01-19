@@ -2,93 +2,68 @@ package main
 
 import (
 	"log"
-	"net"
-	"net/http"
-	"net/rpc"
-
-	"sync"
-
-	"github.com/marcelloh/fastdb"
+	"os"
+	"strconv"
+	"strings"
+	"time"
 )
 
-type SetKeyArgs struct {
-	BucketName string
-	Key        int
-	Value      string
-}
-
-type GetKeyArgs struct {
-	BucketName string
-	Key        int
-}
-
-type DeleteKeyArgs struct {
-	BucketName string
-	Key        int
-}
-
-type Server struct {
-	db    *fastdb.DB
-	mutex sync.Mutex
-}
-
-type Response struct {
-	Data    string
-	Message string
-}
-type EmptyRequest struct{}
-
-func (server *Server) SetKey(agrs *SetKeyArgs, reply *Response) error {
-	server.mutex.Lock()
-	server.db.Set(agrs.BucketName, agrs.Key, []byte(agrs.Value))
-	reply.Message = "OK"
-	defer server.mutex.Unlock()
-	return nil
-}
-
-func (server *Server) GetKey(args *GetKeyArgs, reply *Response) error {
-	data, isExist := server.db.Get(args.BucketName, args.Key)
-	if !isExist {
-		reply.Message = "Not found"
-	} else {
-		reply.Data = string(data)
-	}
-	return nil
-}
-
-func (server *Server) DeleteKey(args *DeleteKeyArgs, reply *Response) error {
-	ok, err := server.db.Del(args.BucketName, args.Key)
-	if !ok {
-		reply.Message = "Faild to delete key" + string(err.Error())
-	} else {
-		reply.Message = "OK"
-	}
-	return nil
-}
-
-func (server *Server) GetStoreInfo(args EmptyRequest, reply *Response) error {
-	reply.Data = server.db.Info()
-	return nil
-}
-
 func main() {
-	store, err := fastdb.Open(":memory:", 100)
+	// 1) Parse environment variables
+	nodeIDStr := os.Getenv("NODE_ID")
+	if nodeIDStr == "" {
+		log.Fatal("Missing environment variable NODE_ID")
+	}
+	nodeID, err := strconv.Atoi(nodeIDStr)
 	if err != nil {
-		log.Fatalf("Failed to open db: %v", err)
-	}
-	defer store.Close()
-	// Create a new RPC server
-	server := &Server{db: store}
-	// Register RPC server
-
-	rpc.Register(server)
-	rpc.HandleHTTP()
-
-	// Listen for requests on port 1234
-	l, e := net.Listen("tcp", ":2233")
-	if e != nil {
-		log.Fatal("listen error:", e)
+		log.Fatalf("Invalid NODE_ID=%s: %v", nodeIDStr, err)
 	}
 
-	http.Serve(l, nil)
+	peersEnv := os.Getenv("PEERS")
+	if peersEnv == "" {
+		log.Println("No PEERS environment var. This node has no peers.")
+	}
+
+	var peerIDs []int
+	if peersEnv != "" {
+		for _, pStr := range strings.Split(peersEnv, ",") {
+			pStr = strings.TrimSpace(pStr)
+			if pStr == "" {
+				continue
+			}
+			pid, err := strconv.Atoi(pStr)
+			if err == nil && pid != nodeID {
+				peerIDs = append(peerIDs, pid)
+			}
+		}
+	}
+
+	// 2) Create the node
+	node := &Node{
+		id:       nodeID,
+		peerIds:  peerIDs,
+		leaderId: -1,
+
+		isElectionGoging: false,
+	}
+
+	node.startInternalServer()
+
+	time.Sleep(2 * time.Second)
+
+	node.startHeartbeatRoutine()
+
+	go func() {
+		time.Sleep(3 * time.Second)
+		node.electionMutex.Lock()
+		if node.leaderId == -1 {
+			node.electionMutex.Unlock()
+			go node.startElection()
+		} else {
+			node.electionMutex.Unlock()
+		}
+	}()
+
+	// Keep this node running
+	select {}
 }

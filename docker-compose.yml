@@ -1,0 +1,36 @@
+version: '3'
+services:
+  node1:
+    build: 
+      dockerfile: Dockerfile
+      context: .
+    image: duytran/distributed_system:latest
+    container_name: bully_node1
+    environment:
+      - NODE_ID=1
+      - PEERS=2
+    network_mode: "host"
+    
+  node2:
+    image: duytran/distributed_system:latest
+    container_name: bully_node2
+    environment:
+      - NODE_ID=2
+      - PEERS=1,3,4
+    network_mode: "host"
+  
+  node3:
+    image: duytran/distributed_system:latest
+    container_name: bully_node3
+    environment:
+      - NODE_ID=3
+      - PEERS=1,2,4
+    network_mode: "host"
+
+  node4:
+    image: duytran/distributed_system:latest
+    container_name: bully_node4
+    environment:
+      - NODE_ID=4
+      - PEERS=1,2,3
+    network_mode: "host"
